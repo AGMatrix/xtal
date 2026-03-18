@@ -1,0 +1,152 @@
+{
+  "title": "XTAL — Tail Latency Control",
+  "uid": "xtal-main",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "End-to-End Latency (p99 / p95 / p50)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(flink_taskmanager_job_latency_source_id_operator_id_operator_subtask_index_bucket[30s])) by (le))",
+          "legendFormat": "p99"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(flink_taskmanager_job_latency_source_id_operator_id_operator_subtask_index_bucket[30s])) by (le))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(flink_taskmanager_job_latency_source_id_operator_id_operator_subtask_index_bucket[30s])) by (le))",
+          "legendFormat": "p50"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ms", "color": { "mode": "palette-classic" } }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Input Buffer Pool Usage (Backpressure Proxy)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "avg by (host) (flink_taskmanager_job_task_buffers_inPoolUsage)",
+          "legendFormat": "{{host}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0, "max": 1,
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "red", "value": 0.8 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Checkpoint Duration (ms)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "flink_jobmanager_job_lastCheckpointDuration",
+          "legendFormat": "last checkpoint ms"
+        },
+        {
+          "expr": "flink_jobmanager_job_lastCheckpointSize",
+          "legendFormat": "last checkpoint size (bytes)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ms" }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Kafka Consumer Lag (events behind)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum by (topic, partition) (kafka_consumergroup_lag)",
+          "legendFormat": "{{topic}}[{{partition}}]"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short" }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Throughput: Records In/Out per Second",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(flink_taskmanager_job_task_operator_numRecordsInPerSecond[30s]))",
+          "legendFormat": "records-in/s"
+        },
+        {
+          "expr": "sum(rate(flink_taskmanager_job_task_operator_numRecordsOutPerSecond[30s]))",
+          "legendFormat": "records-out/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "cps" }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Checkpoint Alignment Time (skew indicator)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "expr": "avg by (task_name) (flink_taskmanager_job_task_checkpointAlignmentTime)",
+          "legendFormat": "{{task_name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ns" }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Kafka Messages In/s",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 24, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "sum(rate(kafka_topic_partition_current_offset[30s]))",
+          "legendFormat": "msgs/s"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "cps" } }
+    },
+    {
+      "id": 8,
+      "title": "Flink JM Uptime",
+      "type": "stat",
+      "gridPos": { "x": 6, "y": 24, "w": 6, "h": 4 },
+      "targets": [
+        {
+          "expr": "flink_jobmanager_Status_JVM_CPU_Time / 1e9",
+          "legendFormat": "JM CPU seconds"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    }
+  ]
+}

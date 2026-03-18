@@ -1,0 +1,170 @@
+version: "3.8"
+
+# XTAL: eXplainable Tail-latency Adaptive controLler
+# Week 1 Infrastructure: Kafka + Flink (1 JM + 3 TM) + Prometheus + Grafana
+
+x-flink-common: &flink-common
+  image: apache/flink:1.18-scala_2.12
+  environment:
+    - FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+        taskmanager.numberOfTaskSlots: 2
+        parallelism.default: 2
+        metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+        metrics.reporter.prom.port: 9249
+        metrics.latency.interval: 1000
+        metrics.latency.granularity: operator
+        execution.checkpointing.interval: 5000
+        execution.checkpointing.mode: EXACTLY_ONCE
+        state.backend: rocksdb
+        state.checkpoints.dir: file:///tmp/flink-checkpoints
+        rest.flamegraph.enabled: true
+  volumes:
+    - ./config/flink/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml:ro
+    - flink-checkpoints:/tmp/flink-checkpoints
+
+services:
+  # ─── Kafka (KRaft, no ZooKeeper) ───────────────────────────────────────────
+  kafka:
+    image: bitnami/kafka:3.6
+    container_name: xtal-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      - KAFKA_CFG_NODE_ID=0
+      - KAFKA_CFG_PROCESS_ROLES=controller,broker
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=0@kafka:9093
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_CFG_NUM_PARTITIONS=4
+      - KAFKA_CFG_LOG_RETENTION_HOURS=1
+      - ALLOW_PLAINTEXT_LISTENER=yes
+    volumes:
+      - kafka-data:/bitnami/kafka
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Kafka metrics exporter for Prometheus
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:latest
+    container_name: xtal-kafka-exporter
+    command: --kafka.server=kafka:9092 --web.listen-address=:9308
+    ports:
+      - "9308:9308"
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  # ─── Flink JobManager ──────────────────────────────────────────────────────
+  jobmanager:
+    <<: *flink-common
+    container_name: xtal-jobmanager
+    ports:
+      - "8081:8081"   # Flink Web UI + REST API
+      - "9249:9249"   # Prometheus metrics
+    command: >
+      bash -c "
+        mkdir -p /opt/flink/plugins/flink-metrics-prometheus &&
+        cp /opt/flink/opt/flink-metrics-prometheus-*.jar /opt/flink/plugins/flink-metrics-prometheus/ &&
+        /docker-entrypoint.sh jobmanager
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/overview"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  # ─── Flink TaskManagers (3x) ───────────────────────────────────────────────
+  taskmanager-1:
+    <<: *flink-common
+    container_name: xtal-taskmanager-1
+    ports:
+      - "9250:9249"
+    command: >
+      bash -c "
+        mkdir -p /opt/flink/plugins/flink-metrics-prometheus &&
+        cp /opt/flink/opt/flink-metrics-prometheus-*.jar /opt/flink/plugins/flink-metrics-prometheus/ &&
+        /docker-entrypoint.sh taskmanager
+      "
+    depends_on:
+      jobmanager:
+        condition: service_healthy
+
+  taskmanager-2:
+    <<: *flink-common
+    container_name: xtal-taskmanager-2
+    ports:
+      - "9251:9249"
+    command: >
+      bash -c "
+        mkdir -p /opt/flink/plugins/flink-metrics-prometheus &&
+        cp /opt/flink/opt/flink-metrics-prometheus-*.jar /opt/flink/plugins/flink-metrics-prometheus/ &&
+        /docker-entrypoint.sh taskmanager
+      "
+    depends_on:
+      jobmanager:
+        condition: service_healthy
+
+  taskmanager-3:
+    <<: *flink-common
+    container_name: xtal-taskmanager-3
+    ports:
+      - "9252:9249"
+    command: >
+      bash -c "
+        mkdir -p /opt/flink/plugins/flink-metrics-prometheus &&
+        cp /opt/flink/opt/flink-metrics-prometheus-*.jar /opt/flink/plugins/flink-metrics-prometheus/ &&
+        /docker-entrypoint.sh taskmanager
+      "
+    depends_on:
+      jobmanager:
+        condition: service_healthy
+
+  # ─── Prometheus ────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: xtal-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=7d"
+      - "--web.enable-lifecycle"
+    depends_on:
+      - jobmanager
+
+  # ─── Grafana ───────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: xtal-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=xtal2024
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/provisioning/dashboards/xtal.json
+    volumes:
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+volumes:
+  kafka-data:
+  flink-checkpoints:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  default:
+    name: xtal-net

@@ -1,0 +1,35 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+  external_labels:
+    cluster: xtal-local
+
+scrape_configs:
+  # ── Flink JobManager ────────────────────────────────────────────────────────
+  - job_name: flink-jobmanager
+    static_configs:
+      - targets: ["jobmanager:9249"]
+        labels:
+          component: jobmanager
+
+  # ── Flink TaskManagers ──────────────────────────────────────────────────────
+  - job_name: flink-taskmanagers
+    static_configs:
+      - targets:
+          - "taskmanager-1:9249"
+          - "taskmanager-2:9249"
+          - "taskmanager-3:9249"
+        labels:
+          component: taskmanager
+
+  # ── Kafka ───────────────────────────────────────────────────────────────────
+  - job_name: kafka
+    static_configs:
+      - targets: ["kafka-exporter:9308"]
+        labels:
+          component: kafka
+
+  # ── Prometheus self-monitoring ───────────────────────────────────────────────
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
