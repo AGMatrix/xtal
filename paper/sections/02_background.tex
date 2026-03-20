@@ -1,0 +1,55 @@
+% ── §2  Background ────────────────────────────────────────────────────────────
+\section{Background}
+\label{sec:background}
+
+\subsection{Tail Latency at Scale}
+Dean and Barroso~\cite{dean2013tail} established that at scale, even a
+small fraction of slow responses dominates the perceived latency of a
+system: a service with 1\% of requests at 1\,s latency sees \pnn{99}
+at that level regardless of the median.
+This ``long tail'' effect is amplified in multi-stage pipelines because
+each stage adds delay, and the slow path of each stage compounds.
+
+\subsection{Apache Flink}
+Apache Flink~\cite{carbone2015flink} is a stateful dataflow engine that
+executes directed acyclic operator graphs over unbounded streams.
+Key knobs relevant to tail latency:
+\begin{itemize}
+  \item \textbf{Checkpoint interval} ($c$): Flink snapshots operator
+    state to durable storage every $c$\ms via a Chandy-Lamport barrier
+    protocol. Short intervals increase fault-tolerance but add barrier
+    overhead and stall operator progress.
+  \item \textbf{Buffer timeout} ($b$): Flink batches output records in
+    network buffers for up to $b$\ms before flushing.
+    Low $b$ reduces latency; high $b$ increases throughput.
+  \item \textbf{Parallelism} ($p$): the number of parallel subtasks
+    per operator. Under-parallelism causes queue buildup; over-parallelism
+    wastes slots and increases coordination overhead.
+\end{itemize}
+
+\subsection{Apache Kafka}
+Kafka~\cite{kreps2011kafka} is the standard ingest layer for Flink
+pipelines. Producer-side \texttt{linger.ms} delays sending to allow
+batch accumulation; high values increase throughput but add latency to
+events at the leading edge of a burst.
+Consumer lag (records not yet consumed by Flink) is a leading indicator
+of backpressure propagation.
+
+\subsection{Explainable AI (XAI)}
+SHAP (SHapley Additive exPlanations)~\cite{lundberg2017shap} assigns to
+each feature a contribution value that satisfies the Shapley axioms
+(efficiency, symmetry, dummy, additivity).
+For tree-based models, \texttt{TreeExplainer} computes exact SHAP values
+in $O(TLD^2)$ time, where $T$ is the number of trees, $L$ the number of
+leaves, and $D$ the maximum depth---making it practical in a 10-second
+control loop.
+
+\subsection{Contextual Bandits}
+A contextual bandit selects one of $K$ actions given a context vector,
+observes a scalar reward, and updates a policy~\cite{sutton2018rl}.
+Unlike full RL, there is no credit-assignment across time steps, which
+simplifies online learning and analysis.
+We use XGBoost~\cite{chen2016xgboost} as the reward predictor because:
+(a)~it is natively interpretable via SHAP;
+(b)~it handles tabular, non-stationary data well;
+(c)~online retraining is fast ($<$\,100\ms for $<$\,10k samples).

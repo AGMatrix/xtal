@@ -21,7 +21,13 @@ from dataclasses import dataclass
 from typing import Optional
 
 import requests
-from confluent_kafka.admin import AdminClient, ConfigResource, ConfigEntry, ConfigSource
+
+try:
+    from confluent_kafka.admin import AdminClient, ConfigResource, ConfigEntry, ConfigSource
+    _KAFKA_AVAILABLE = True
+except ImportError:
+    _KAFKA_AVAILABLE = False
+    AdminClient = None  # type: ignore
 
 log = logging.getLogger(__name__)
 
@@ -175,6 +181,10 @@ class KafkaActuator:
     """Wraps the Kafka AdminClient for producer/topic config tuning."""
 
     def __init__(self, bootstrap_servers: str = KAFKA_BOOTSTRAP):
+        if not _KAFKA_AVAILABLE:
+            log.warning("confluent_kafka not available — KafkaActuator is a no-op")
+            self._admin = None
+            return
         self._admin = AdminClient({"bootstrap.servers": bootstrap_servers})
 
     def get_topic_config(self, topic: str) -> dict[str, str]:

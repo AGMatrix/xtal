@@ -15,6 +15,13 @@ stable-baselines3>=2.2.0 # PPO fallback if XGBoost bandit underperforms
 # Experiment logging
 mlflow>=2.9.0
 
+# Week 4: Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# Week 5: Plotting (paper figures)
+matplotlib>=3.8.0
+
 # Utilities
 pydantic>=2.5.0
 rich>=13.7.0             # pretty CLI output

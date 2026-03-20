@@ -1,0 +1,34 @@
+% ── §8  Conclusion ────────────────────────────────────────────────────────────
+\section{Conclusion}
+\label{sec:conclusion}
+
+We presented \xtal, a closed-loop, cross-layer, explainable tail-latency
+controller for real-time streaming pipelines.
+\xtal closes the gap between rich runtime telemetry and the large knob
+space exposed by Kafka and Apache Flink, using an XGBoost contextual
+bandit that learns online without offline profiling.
+Its safety layer enforces correctness invariants independently of the
+learned policy, and its SHAP-based explanations give operators a clear
+account of every control decision.
+
+In evaluation on NEXMark benchmarks:
+\begin{itemize}
+  \item \xtal reduces mean \pnn{99} latency by up to \textbf{64\%}
+    during 10$\times$ burst events versus Static-Default.
+  \item \xtal cuts SLA violation rate from \textbf{17.8\%} to \textbf{1.7\%}
+    under bursty load and from \textbf{22.2\%} to \textbf{1.7\%}
+    during TaskManager failure.
+  \item \xtal achieves \textbf{2.3$\times$ faster recovery} after failure
+    injection than hand-tuned static configuration.
+  \item Control loop overhead is under \textbf{220\ms} per 10-second
+    interval, imposing negligible cost on the pipeline.
+\end{itemize}
+
+\paragraph{Future Work.}
+\xtal currently uses a discrete action space; continuous action spaces
+with policy gradient methods are a natural extension.
+Multi-job control (tuning across multiple concurrent Flink jobs sharing
+a cluster) is an open problem.
+Finally, extending explainability from per-decision to
+\emph{counterfactual} explanations (``what would have happened if we
+had not acted?'') would further improve operator trust.

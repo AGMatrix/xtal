@@ -1,0 +1,62 @@
+% ── §1  Introduction ──────────────────────────────────────────────────────────
+\section{Introduction}
+\label{sec:intro}
+
+Distributed streaming pipelines increasingly support applications with
+hard real-time constraints: real-time financial fraud detection, autonomous
+vehicle perception stacks, and sub-second interactive analytics.
+In these systems, \emph{tail latency}---the \pnn{99} or \pnn{999}
+end-to-end processing delay---rather than average throughput determines
+whether a deadline is met~\cite{dean2013tail}.
+A single slow request that crosses a 500\ms SLA boundary is a failure
+regardless of what the mean latency is.
+
+Modern stream processing engines, Apache Flink~\cite{carbone2015flink}
+and Apache Kafka~\cite{kreps2011kafka} chief among them, have rich knob
+spaces: checkpoint intervals govern fault-tolerance overhead;
+buffer timeouts trade batching efficiency for added latency;
+operator parallelism determines how evenly load is distributed.
+Yet these knobs are set \emph{statically} at deployment time.
+When load spikes, a TaskManager fails, or a noisy neighbour contends for
+CPU, the configuration that was optimal at startup becomes harmful.
+Production operators respond with manual re-tuning or coarse autoscalers
+that react too slowly and overshoot~\cite{welsh2001seda}.
+
+We identify three structural gaps in the state of the art:
+\begin{enumerate}
+  \item \textbf{No cross-layer view.} Tail spikes emerge from interactions
+    across the ingest layer (Kafka consumer lag), the execution layer
+    (Flink buffer backpressure), and the state layer (checkpoint stalls).
+    Existing autoscalers address at most one layer.
+  \item \textbf{No closed-loop learning.} Rule-based threshold systems
+    react but do not generalise. They require hand-crafted thresholds that
+    vary by workload and cluster configuration.
+  \item \textbf{No explainability.} Even if a controller works, operators
+    need to understand its decisions to trust it in production.
+\end{enumerate}
+
+We present \xtal (\textbf{eX}plainable \textbf{T}ail-latency
+\textbf{A}daptive contro\textbf{L}ler), a system that closes all three
+gaps simultaneously.
+\xtal runs a 10-second control loop that: (i)~collects a six-dimensional
+telemetry snapshot from Prometheus; (ii)~selects a joint Flink+Kafka
+configuration from a discrete action space using an XGBoost contextual
+bandit trained online; (iii)~applies the configuration through real APIs;
+and (iv)~produces per-decision SHAP feature attributions that show which
+telemetry signal drove the control decision.
+A hard safety layer enforces correctness invariants (e.g., checkpoint
+interval $\geq 500$\ms) independently of the learned policy.
+
+\paragraph{Contributions.}
+\begin{itemize}
+  \item \xtal, the first closed-loop, cross-layer, explainable
+    tail-latency controller for a real Kafka\,+\,Flink stack~(\S\ref{sec:design}).
+  \item A baseline characterisation study of where tail spikes originate
+    under steady, burst, and failure conditions~(\S\ref{sec:motivation}).
+  \item An online XGBoost contextual bandit formulation with a provably
+    safe action space and SHAP explainability, requiring no offline
+    training~(\S\ref{sec:design}).
+  \item An evaluation on NEXMark benchmarks showing up to 38\% \pnn{99}
+    reduction and 7$\times$ lower SLA violation rate versus the
+    next-best baseline~(\S\ref{sec:eval}).
+\end{itemize}

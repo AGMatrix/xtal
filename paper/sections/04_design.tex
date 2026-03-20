@@ -1,0 +1,119 @@
+% ── §4  Design ────────────────────────────────────────────────────────────────
+\section{XTAL Design}
+\label{sec:design}
+
+Figure~\ref{fig:arch} shows the \xtal architecture.
+The system consists of four components: a Telemetry Collector, an
+XGBoost Contextual Bandit Agent, a Safety Layer, and an Actuator.
+
+\begin{figure}[t]
+  \centering
+  % Replace with actual architecture figure after experiments
+  \fbox{\parbox{0.9\columnwidth}{\centering\vspace{2em}
+    [Architecture diagram: Figure 1 from experiments/figures/]\vspace{2em}}}
+  \caption{XTAL architecture. The 10-second control loop spans two system
+    layers (Flink execution layer and Kafka ingest layer).}
+  \label{fig:arch}
+\end{figure}
+
+\subsection{State Space}
+\xtal observes a six-dimensional state vector $\mathbf{s}_t \in \mathbb{R}^6$
+sampled every control interval:
+
+\begin{center}
+\small
+\begin{tabular}{ll}
+\toprule
+Feature & Source \\
+\midrule
+$p99\_latency\_ms$ & Prometheus histogram quantile (Flink) \\
+$p999\_latency\_ms$ & Prometheus histogram quantile (Flink) \\
+$input\_buffer\_usage$ & \texttt{flink\_taskmanager\_job\_task\_buffers\_inPoolUsage} \\
+$checkpoint\_duration\_ms$ & \texttt{flink\_jobmanager\_job\_lastCheckpointDuration} \\
+$kafka\_consumer\_lag$ & \texttt{kafka\_consumergroup\_lag} (Kafka Exporter) \\
+$records\_in\_per\_sec$ & Flink records-in rate (30\,s window) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Action Space}
+\xtal selects from 14 discrete joint configurations
+$(c, b, \ell) \in \mathcal{A}$, where $c$ is checkpoint interval (ms),
+$b$ is buffer timeout (ms), and $\ell$ is Kafka linger (ms).
+The space spans from the most aggressive
+$(c=500, b=0, \ell=0)$ to the most conservative
+$(c=10000, b=100, \ell=50)$, with intermediate points covering the
+space identified as beneficial in the baseline study (\S\ref{sec:motivation}).
+Discrete actions simplify the safety layer and make SHAP values directly
+interpretable as ``why this configuration over another.''
+
+\subsection{Reward Function}
+The reward for the transition $(\mathbf{s}_t, a_t, \mathbf{s}_{t+1})$ is:
+
+\begin{equation}
+r_t = -\frac{\min(p99_{t+1},\; p99_{max})}{p99_{SLA}}
+      \;+\; r_{SLA}
+      \;+\; r_{tput}
+      \;+\; r_{ckpt}
+      \;+\; r_{bp}
+\end{equation}
+
+where $p99_{SLA}=500$\ms, $p99_{max}=5000$\ms,
+$r_{SLA}=-20$ if $p99_{t+1}>p99_{SLA}$ else $0$,
+$r_{tput}=0.5\,(\frac{tput_{t+1}}{tput_t}-1)$ (capped at $+0.25$),
+$r_{ckpt}=-1$ if $ckpt_{t+1}>10{,}000$\ms,
+$r_{bp}=-2$ if $buffer\_usage_{t+1}>0.9$.
+The primary term penalises latency proportionally to SLA headroom.
+The SLA penalty creates a hard cliff to avoid lingering near the boundary.
+
+\subsection{XGBoost Contextual Bandit}
+We maintain a single XGBoost regressor $f: \mathbb{R}^{9} \to \mathbb{R}$
+with input $(\mathbf{s}_t \| a_t)$ (state\,||\,action features) and
+output the predicted reward.
+At each step:
+\begin{enumerate}
+  \item With probability $\epsilon$ (decaying $0.3\to0.05$ over 500 steps),
+    select a random action (exploration).
+  \item Otherwise, evaluate $f$ for all 14 actions and select
+    $a^* = \arg\max_a f(\mathbf{s}_t \| a)$ (exploitation).
+  \item Record the transition $(\mathbf{s}_t, a_t, r_t, \mathbf{s}_{t+1})$.
+  \item Retrain $f$ on all collected experience every 20 steps.
+\end{enumerate}
+
+\subsection{Safety Layer}
+Before any action reaches the Flink REST API or Kafka AdminClient,
+the safety layer enforces hard constraints:
+\begin{itemize}
+  \item $500 \leq c \leq 30{,}000$\ms (never disable checkpoints;
+    never checkpoint more than 2$\times$/s which would stall operators)
+  \item $1 \leq p \leq 12$ (never stop processing; never exceed slot budget)
+  \item $0 \leq b \leq 200$\ms (never introduce more than 200\ms buffering)
+\end{itemize}
+These bounds are enforced by \texttt{ControlAction.is\_safe()} before any
+API call. An unsafe action is rejected and logged; the previous
+configuration persists.
+
+Additionally, when $p99 > 0.8 \times p99_{SLA}$ (approaching SLA boundary),
+the predicted rewards of all actions with $c > 2000$\ms are penalised by
+$-5.0$ before the argmax, biasing the agent toward low-overhead
+configurations under pressure.
+
+\subsection{SHAP Explainability}
+After each exploitative decision, \xtal runs
+\texttt{shap.TreeExplainer} on the chosen action's input row and records
+the top-3 (feature, SHAP value) pairs in the decision log CSV.
+A positive SHAP value for feature $x$ means $x$'s current value
+\emph{increased} the predicted reward for the chosen action relative
+to the expected output over the training set.
+This lets an operator read, for example:
+
+\begin{quote}\small
+\textit{Action \#6 (ckpt=2000ms, buf=10ms, linger=5ms): \\
+  Key drivers:\\
+  \quad input\_buffer\_usage: $\downarrow$ decreases reward by 0.41\\
+  \quad p99\_latency\_ms: $\uparrow$ increases reward by 0.28\\
+  \quad checkpoint\_ms: $\uparrow$ increases reward by 0.10}
+\end{quote}
+
+That is: ``buffer backpressure is high (hurting us), but reducing
+checkpoint overhead outweighs it.''

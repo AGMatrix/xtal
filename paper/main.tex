@@ -1,0 +1,92 @@
+% XTAL: eXplainable Tail-latency Adaptive controLler
+% ACM SIGOPS / IEEE format — 12 pages
+% Target: Middleware 2026 / SoCC 2026
+
+\documentclass[sigconf,natbib=false]{acmart}
+
+% ── Packages ──────────────────────────────────────────────────────────────────
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{microtype}
+\usepackage{xspace}
+\usepackage{amsmath}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{subcaption}
+\usepackage{hyperref}
+
+% ── Macros ────────────────────────────────────────────────────────────────────
+\newcommand{\xtal}{\textsc{XTAL}\xspace}
+\newcommand{\pnn}[1]{p$_{#1}$}
+\newcommand{\ms}{\,ms\xspace}
+
+% ── Metadata ──────────────────────────────────────────────────────────────────
+\title{\xtal: Explainable Closed-Loop Tail-Latency Control\\
+       for Strict-Deadline Distributed Streaming Pipelines}
+
+\author{Akanksha Garg}
+\email{ag2671@rit.edu}
+\affiliation{%
+  \institution{Rochester Institute of Technology}
+  \city{Rochester}
+  \state{New York}
+  \country{USA}
+}
+
+\author{Hrithik Manoj Gaikwad}
+\email{hg3916@rit.edu}
+\affiliation{%
+  \institution{Rochester Institute of Technology}
+  \city{Rochester}
+  \state{New York}
+  \country{USA}
+}
+
+\begin{abstract}
+Strict-deadline streaming pipelines—real-time analytics, autonomous perception—
+are governed by tail latency (\pnn{99}/\pnn{999}) rather than average throughput.
+Existing engines such as Apache Flink and Kafka expose powerful knobs for
+checkpointing, buffering, and parallelism, yet no production system closes the
+loop between runtime telemetry and these knobs to actively suppress tail spikes.
+We present \xtal, the first cross-layer, closed-loop tail-latency controller for
+a real Kafka\,+\,Flink streaming stack.
+\xtal operates a 10\,s control loop: it observes a six-dimensional system state
+via Prometheus, selects one of 14 discrete configuration presets using an
+XGBoost contextual bandit, applies the action through the Flink REST API and
+Kafka AdminClient, and generates per-decision SHAP feature attributions that
+explain \emph{why} each knob was changed.
+A hard safety layer enforces correctness constraints independently of the
+learned policy.
+We evaluate \xtal on the NEXMark benchmark under three load patterns
+(steady, 10$\times$ burst, TaskManager failure) against three baselines:
+Flink defaults, the best hand-tuned static configuration, and a
+threshold-based reactive autoscaler.
+\xtal reduces mean \pnn{99} latency by up to \textbf{64\%} during burst events
+and cuts SLA violation rate from \textbf{22\%} to \textbf{1.7\%} under failure injection,
+recovering 2.3$\times$ faster than the best static baseline,
+with a per-decision control overhead under 220\ms.
+\end{abstract}
+
+\keywords{tail latency, streaming systems, explainable AI, reinforcement learning,
+          Apache Flink, Apache Kafka, closed-loop control}
+
+\begin{document}
+
+\maketitle
+
+% ── Sections (included from separate files) ───────────────────────────────────
+\input{sections/01_intro}
+\input{sections/02_background}
+\input{sections/03_motivation}
+\input{sections/04_design}
+\input{sections/05_implementation}
+\input{sections/06_evaluation}
+\input{sections/07_related}
+\input{sections/08_conclusion}
+
+% ── References ────────────────────────────────────────────────────────────────
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{xtal}
+
+\end{document}

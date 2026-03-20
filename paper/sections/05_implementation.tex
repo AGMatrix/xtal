@@ -1,0 +1,50 @@
+% ── §5  Implementation ────────────────────────────────────────────────────────
+\section{Implementation}
+\label{sec:impl}
+
+\subsection{Infrastructure}
+The full system runs on Docker Compose: Kafka 3.6 (KRaft, no ZooKeeper),
+Flink 1.18 (1 JobManager + 3 TaskManagers, 2 slots each), Prometheus,
+and Grafana.
+Flink's built-in Prometheus reporter (loaded as a plugin jar) exposes
+metrics on port 9249 per container.
+A Kafka Exporter sidecar bridges Kafka JMX to Prometheus format.
+
+\subsection{Telemetry Collector}
+\texttt{TelemetryCollector} issues six instant PromQL queries over HTTP
+with a 3-second timeout each.
+Queries use a 30-second rate window for throughput to smooth noise without
+lagging more than one control interval.
+Missing or zero values (e.g., no running job) default to 0.0 and are
+logged as warnings.
+
+\subsection{Actuator}
+The Flink actuator wraps the Flink REST API:
+\begin{itemize}
+  \item Dynamic config updates (\texttt{PATCH /jobs/\{id\}/config}) apply
+    without job restart for supported keys in Flink 1.17+.
+  \item Parallelism changes require a stop-with-savepoint\,+\,restart sequence,
+    which \xtal issues conservatively (only when buffer usage $>0.85$ for
+    $>30$\,s).
+\end{itemize}
+The Kafka actuator uses the \texttt{confluent-kafka} AdminClient to
+update topic-level configs; Kafka linger is communicated as a producer
+hint file (\texttt{/tmp/xtal\_producer\_hints.json}) read by the load
+generator, since linger is a producer-side property.
+
+\subsection{Control Loop Overhead}
+We measure the wall-clock time of each control-loop iteration
+(Prometheus queries + XGBoost inference + SHAP + API calls).
+The Prometheus query fan-out takes 50--120\ms (6 queries, HTTP).
+XGBoost inference over 14 action rows takes $<$\,5\ms.
+SHAP TreeExplainer on one row takes 3--15\ms depending on tree depth.
+Flink dynamic config update via REST takes 20--80\ms.
+Total per-step overhead: \textbf{80--220\ms}, well within the 10-second
+control interval. Retraining XGBoost on $\leq$1{,}000 samples takes
+$<$\,150\ms and occurs every 20 steps (every $\sim$3 minutes).
+
+\subsection{Decision Logging}
+Every control step writes one row to a CSV:
+state features, chosen action, predicted reward, actual reward,
+and SHAP top-3 attributions.
+This log feeds Figure~\ref{fig:shap} in the evaluation.

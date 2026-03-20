@@ -1,0 +1,66 @@
+% ── §3  Motivation ────────────────────────────────────────────────────────────
+\section{Motivation: Where Does Tail Latency Come From?}
+\label{sec:motivation}
+
+To motivate \xtal, we characterise the uncontrolled Kafka\,+\,Flink
+pipeline under three load patterns and four static configurations.
+This study answers two questions:
+(1)~Under what conditions does tail latency spike, and how quickly?
+(2)~Which internal signal (\texttt{inPoolUsage} vs.\
+checkpoint duration vs.\ consumer lag) spikes first?
+
+\subsection{Experimental Setup}
+We run Flink 1.18 (1 JobManager, 3 TaskManagers, 2 slots each) and
+Kafka 3.6 in Docker on a single host.
+The workload is NEXMark Query~5 (sliding window auction join) driven
+by our load generator at 5{,}000~events/s.
+Metrics are scraped via Prometheus at 5-second intervals.
+We test four static configurations:
+\begin{itemize}
+  \item \textbf{Default:} checkpoint=5\,s, buffer\_timeout=100\ms, linger=5\ms
+  \item \textbf{Low-latency:} checkpoint=500\ms, buffer\_timeout=0\ms, linger=0\ms
+  \item \textbf{High-throughput:} checkpoint=10\,s, buffer\_timeout=100\ms, linger=50\ms
+  \item \textbf{Hand-tuned:} checkpoint=2\,s, buffer\_timeout=10\ms, linger=5\ms
+\end{itemize}
+
+\subsection{Steady Load}
+Under constant 5{,}000~events/s, all configurations achieve \pnn{99}
+below the 500\ms SLA, with the default configuration exhibiting
+\pnn{99}\,$\approx$\,180\ms and periodic spikes to 350\ms coinciding
+with checkpoint barriers (visible as \texttt{lastCheckpointDuration}
+pulses in Prometheus).
+
+\subsection{Bursty Load}
+At $t=30$\,s, throughput jumps 10$\times$ to 50{,}000~events/s for 10\,s.
+The sequence of events is consistent across all configurations:
+\begin{enumerate}
+  \item Kafka consumer lag grows within 1\,s as Flink cannot drain the
+    partition at burst rate.
+  \item Input buffer usage (\texttt{inPoolUsage}) saturates to $>$0.9
+    within 5\,s, triggering Flink backpressure.
+  \item Checkpoint barriers stall behind full buffers;
+    \texttt{lastCheckpointDuration} spikes from $\sim$850\ms to
+    $>$8{,}000\ms.
+  \item End-to-end \pnn{99} rises to 1{,}200--3{,}400\ms (2.4--6.8$\times$
+    the SLA) and remains elevated for 25--60\,s after the burst ends.
+\end{enumerate}
+The \textbf{hand-tuned} configuration recovers fastest (28\,s) because its
+shorter checkpoint interval (2\,s) limits barrier alignment overhead.
+The \textbf{high-throughput} configuration is worst, taking 62\,s to recover.
+
+\textbf{Finding~1:} Consumer lag and input buffer usage are leading
+indicators of a tail spike; checkpoint duration spikes are the mechanism
+that sustains the spike.
+
+\subsection{Failure Injection}
+We kill one TaskManager at $t=45$\,s.
+Flink detects the failure and triggers job restart with a savepoint.
+During recovery (30--50\,s), \pnn{99} is undefined (no results produced).
+After recovery, the two remaining TaskManagers are overloaded:
+consumer lag grows and \pnn{99} settles at 800--1{,}400\ms---above SLA---
+until the operator is restarted with reduced parallelism or the burst abates.
+
+\textbf{Finding~2:} Post-failure, the pipeline often stabilises at a new
+operating point \emph{above} the SLA without intervention. A controller
+that can reduce checkpoint frequency and buffer timeout post-recovery
+accelerates the return to SLA compliance.

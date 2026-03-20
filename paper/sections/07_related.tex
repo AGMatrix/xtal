@@ -1,0 +1,39 @@
+% ── §7  Related Work ──────────────────────────────────────────────────────────
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{Tail Latency Mitigation.}
+Dean and Barroso~\cite{dean2013tail} survey hedged requests and
+tied requests as application-level mitigations. These are complementary
+to \xtal, which operates at the infrastructure layer.
+SEDA~\cite{welsh2001seda} uses staged event-driven queues with dynamic
+thread-pool tuning but does not cross the streaming-to-storage boundary,
+and predates modern ML-based control.
+
+\paragraph{Streaming Engine Autoscaling.}
+Naiad~\cite{murray2013naiad} and MillWheel~\cite{akidau2013millwheel}
+address fault tolerance and consistency but do not expose closed-loop
+latency control. Flink's Adaptive Scheduler~\cite{carbone2015flink}
+adjusts task slot assignments reactively but does not tune checkpointing
+or Kafka-side parameters, and does not produce explanations.
+DS2~\cite{kalavri2018} and similar data-driven autoscalers optimise
+throughput, not tail latency, and require offline profiling.
+
+\paragraph{ML-Based System Tuning.}
+CDBTune and OtterTune apply Bayesian optimisation and RL to database
+knob tuning; their offline training phase is prohibitive for streaming
+workloads with rapidly changing load. \xtal uses online contextual
+bandits that adapt within minutes without offline profiling.
+Decima~\cite{mao2019} applies RL to cluster job scheduling; it targets
+job completion time, not per-event tail latency.
+
+\paragraph{Explainable AI for Systems.}
+SHAP has been applied to network traffic classification and AIOps alert
+ranking, but not to control-plane decisions in streaming systems.
+\xtal is the first to produce per-decision SHAP attributions in a
+streaming-engine control loop.
+
+\paragraph{Distributed Tracing.}
+Dapper~\cite{sigelman2010dapper} and Jaeger make tail latency
+\emph{diagnosable} post-hoc; \xtal makes it \emph{controllable}
+in real time.
